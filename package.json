@@ -1,0 +1,12 @@
+{
+  "name": "syllabus-generation",
+  "version": "1.0.0",
+  "description": "Syllabus generation system with pluggable curriculum models",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": ["syllabus", "curriculum"],
+  "license": "ISC"
+}
