@@ -1,73 +1,24 @@
 import streamlit as st
-import os
+
+from ui.course_form import render_course_form
+from ui.login import render_login
+from ui.preview import render_preview
+from utils.session import init_session_state
 
 st.set_page_config(
     page_title="Curriculum Structuring System",
-    layout="wide"
+    layout="wide",
 )
 
-st.title("📚 Curriculum Structuring System")
+init_session_state()
 
+st.title("📚 Curriculum Structuring System")
 st.markdown("---")
 
-# University Login
-st.header("University Login")
+if st.session_state.current_step == "preview":
+    render_preview()
+else:
+    render_login()
 
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
-
-if st.button("Login"):
-
-    st.success("Login Successful")
-
-    st.markdown("---")
-
-    st.header("Upload Syllabus")
-
-    uploaded_file = st.file_uploader(
-        "Upload Syllabus (PDF/DOC)",
-        type=["pdf", "doc", "docx"]
-    )
-
-    st.markdown("---")
-
-    st.header("Course Details")
-
-    program_name = st.text_input("Program Name")
-
-    course_name = st.text_input("Course Name")
-
-    credit = st.selectbox(
-        "Credit",
-        [1, 2, 3, 4]
-    )
-
-    level = st.selectbox(
-        "Level",
-        ["UG", "PG"]
-    )
-
-    st.markdown("---")
-
-    st.header("Course Structuring Model")
-
-    model = st.radio(
-        "Select Model",
-        [
-            "Standard Model (Academic)",
-            "Micro-Unit Model (LMS Style)",
-            "Custom Model (Manual Input)"
-        ]
-    )
-
-    if st.button("Generate Structure"):
-
-        st.success("Information Captured Successfully")
-
-        st.write("### Summary")
-
-        st.write("Program:", program_name)
-        st.write("Course:", course_name)
-        st.write("Credits:", credit)
-        st.write("Level:", level)
-        st.write("Selected Model:", model)
+    if st.session_state.logged_in:
+        render_course_form()
