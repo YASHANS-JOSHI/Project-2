@@ -4,6 +4,10 @@ import streamlit as st
 
 from utils.session import reset_to_form
 
+from services.calculation_engine import calculate_ugc_metrics
+from services.time_engine import calculate_time_distribution
+from services.slm_generator import generate_slm_structure
+
 PREVIEW_STYLES = """
 <style>
 .preview-summary-card {
@@ -181,9 +185,118 @@ def render_preview() -> None:
     units = result.get("units", [])
     total_units = result.get("totalUnits", len(units) if units else "N/A")
 
+   
+    credit = int(st.session_state.credit)
+
+    if units:
+        topics_per_unit = units[0]["topicCount"]
+    else:
+        topics_per_unit = 0
+
+    ugc = calculate_ugc_metrics(
+        credit,
+        total_units,
+        topics_per_unit
+    )
+
+    time_data = calculate_time_distribution(
+        total_units,
+        topics_per_unit,
+        ugc["learning_hours"]
+    )
+
+    slm = generate_slm_structure(
+        total_units,
+        topics_per_unit
+    )
+
     _render_summary_card(total_units)
 
+    st.markdown("---")
+
+    st.subheader("UGC / DEB Calculation Engine")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Learning Hours",
+            ugc["learning_hours"]
+        )
+
+    with col2:
+        st.metric(
+            "Word Count",
+            f'{ugc["min_words"]} - {ugc["max_words"]}'
+        )
+
+    with col3:
+        st.metric(
+            "Pages",
+            f'{ugc["min_pages"]} - {ugc["max_pages"]}'
+        )
+
+    st.write(
+        "Words Per Unit:",
+        ugc["words_per_unit"]
+    )
+
+    st.write(
+        "Words Per Topic:",
+        ugc["words_per_topic"]
+    )
+
+    st.markdown("---")
+
+    st.subheader("Time & Delivery Engine")
+
+    st.write(
+        "Time Per Unit:",
+        time_data["time_per_unit"],
+        "minutes"
+    )
+
+    st.write(
+        "Time Per Topic:",
+        time_data["time_per_topic"],
+        "minutes"
+    )
+
+    st.write(
+        "Total Course Time:",
+        time_data["total_course_time"],
+        "minutes"
+    )
+
+    st.markdown("---")
+
+    st.subheader("SLM Structure Preview")
+
+    for unit in slm:
+
+        with st.expander(unit["unit_title"]):
+
+            st.write("Introduction:")
+            st.write(unit["introduction"])
+
+            st.write("Learning Objectives:")
+
+            for objective in unit["learning_objectives"]:
+                st.write("•", objective)
+
+            st.write("Topics:")
+
+            for topic in unit["topics"]:
+                st.write("•", topic)
+
+            st.write("Summary:")
+            st.write(unit["summary"])
+
+            st.write("Case Study:")
+            st.write(unit["case_study"])
+
     st.subheader("Generated Units & Themes")
+
     st.caption(
         "Each unit includes a rule-engine theme with 4–5 topics based on the selected structuring model."
     )
@@ -198,3 +311,5 @@ def render_preview() -> None:
     if st.button("Back to Course Form"):
         reset_to_form()
         st.rerun()
+    
+
