@@ -1,43 +1,39 @@
-import json
-import subprocess
-from pathlib import Path
+def generate_structure(model_type, credits):
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CLI_PATH = PROJECT_ROOT / "src" / "cli.js"
+    credits = int(credits)
 
+    if model_type == "standard":
 
-def generate_structure(model_type: str, credits: int) -> dict:
-    """
-    Invoke the Node.js model factory CLI and return the parsed JSON result.
+        total_units = credits + 1
+        topic_count = 5
 
-    Raises:
-        RuntimeError: When the Node process fails or returns invalid JSON.
-    """
-    payload = json.dumps({"modelType": model_type, "credits": credits})
+    elif model_type == "micro":
 
-    try:
-        result = subprocess.run(
-            ["node", str(CLI_PATH)],
-            input=payload,
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "Node.js is not installed or not available on PATH."
-        ) from exc
+        total_units = credits * 4
+        topic_count = 3
 
-    stdout = result.stdout.strip()
+    elif model_type == "custom":
 
-    if not stdout:
-        stderr = result.stderr.strip() or "No output from model generator."
-        raise RuntimeError(stderr)
+        total_units = credits
+        topic_count = 4
 
-    try:
-        parsed = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid JSON from model generator: {stdout}") from exc
+    else:
+        return {
+            "error": f"Unknown model type: {model_type}"
+        }
 
-    return parsed
+    units = []
+
+    for i in range(1, total_units + 1):
+
+        units.append({
+            "unitNumber": i,
+            "unitTitle": f"Unit {i}",
+            "topicCount": topic_count,
+            "shortDescription": f"Generated content for Unit {i}"
+        })
+
+    return {
+        "totalUnits": total_units,
+        "units": units
+    }
