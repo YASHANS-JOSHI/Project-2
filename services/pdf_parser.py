@@ -1,36 +1,57 @@
 import fitz
+import pytesseract
+from PIL import Image
+import io
+
+pytesseract.pytesseract.tesseract_cmd = (
+    r"C:\Users\Yash\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+)
+
 
 def extract_text_from_pdf(uploaded_file):
 
-    print("PDF PARSER CALLED")
-
-    file_bytes = uploaded_file.read()
-
-    print("BYTES =", len(file_bytes))
+    file_bytes = uploaded_file.getvalue()
 
     pdf = fitz.open(
         stream=file_bytes,
         filetype="pdf"
     )
 
-    print("PAGES =", len(pdf))
-
     text = ""
 
-    for i, page in enumerate(pdf):
+    for page in pdf:
 
         page_text = page.get_text("text")
 
-        print(
-            f"PAGE {i+1} LENGTH =",
-            len(page_text)
-        )
-
         text += page_text
 
-    print(
-        "TOTAL LENGTH =",
-        len(text)
-    )
+    # If normal extraction worked
+    if len(text.strip()) > 100:
+
+        print("TEXT PDF DETECTED")
+
+        return text
+
+    print("OCR FALLBACK ACTIVATED")
+
+    text = ""
+
+    for page in pdf:
+
+        pix = page.get_pixmap(
+            matrix=fitz.Matrix(2, 2)
+        )
+
+        image = Image.open(
+            io.BytesIO(
+                pix.tobytes("png")
+            )
+        )
+
+        page_text = pytesseract.image_to_string(
+            image
+        )
+
+        text += page_text + "\n"
 
     return text
