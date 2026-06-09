@@ -5,6 +5,11 @@ from services.rule_engine_service import generate_unit_themes, merge_structure_w
 from services.validation import validate_course_form
 from utils.session import store_course_form
 
+from services.pdf_parser import extract_text_from_pdf
+from services.unit_parser import extract_units_and_topics
+
+from services.gemini_parser import extract_units_topics_with_gemini
+
 
 def render_course_form() -> None:
     st.markdown("---")
@@ -78,6 +83,29 @@ def render_course_form() -> None:
             st.rerun()
 
         uploaded_file_name = uploaded_file.name if uploaded_file else None
+        if uploaded_file:
+
+            syllabus_text = extract_text_from_pdf(
+                uploaded_file
+            )
+             
+            st.text_area(
+                "Extracted PDF Text",
+                syllabus_text,
+                height=300
+            )
+
+           
+
+            units_data = extract_units_topics_with_gemini(
+                    syllabus_text
+                )
+            
+
+            st.session_state.units_data = units_data
+            
+
+           
         store_course_form(
             program_name.strip(),
             course_name.strip(),

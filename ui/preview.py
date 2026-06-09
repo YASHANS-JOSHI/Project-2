@@ -181,6 +181,7 @@ def render_preview() -> None:
     _render_html(PREVIEW_STYLES)
 
     st.header("Syllabus Structure Preview")
+    
 
     units = result.get("units", [])
     total_units = result.get("totalUnits", len(units) if units else "N/A")
@@ -295,16 +296,29 @@ def render_preview() -> None:
             st.write("Case Study:")
             st.write(unit["case_study"])
 
+    
+
     st.subheader("Generated Units & Themes")
 
     st.caption(
         "Each unit includes a rule-engine theme with 4–5 topics based on the selected structuring model."
     )
 
-    if units:
-        _render_units_table(units)
+    if "units_data" in st.session_state and st.session_state.units_data:
+
+        for unit_name, topics in st.session_state.units_data.items():
+
+            st.markdown(f"### {unit_name}")
+
+            for topic in topics:
+                st.write("•", topic)
+
     else:
-        st.info("No units were generated.")
+
+        if units:
+            _render_units_table(units)
+        else:
+            st.info("No units were generated.")
 
     st.markdown("---")
 
