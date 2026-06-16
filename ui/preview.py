@@ -121,7 +121,7 @@ def _render_html(markup: str) -> None:
         st.markdown(content, unsafe_allow_html=True)
 
 
-def _render_summary_card(total_units: int | str) -> None:
+def _render_summary_card(total_units: int | str, total_topics: int | str) -> None:
     fields = [
         ("Program Name", st.session_state.program_name),
         ("Course Name", st.session_state.course_name),
@@ -129,6 +129,7 @@ def _render_summary_card(total_units: int | str) -> None:
         ("Level", st.session_state.level),
         ("Selected Model", st.session_state.model_label),
         ("Total Units", total_units),
+        ("Total Topics", total_topics),
     ]
 
     grid_items = "".join(
@@ -145,12 +146,20 @@ def _render_summary_card(total_units: int | str) -> None:
     )
 
 
+def _format_topics(topics: list[str]) -> str:
+    if not topics:
+        return "—"
+
+    return "<br>".join(f"• {_escape(topic)}" for topic in topics)
+
+
 def _render_units_table(units: list[dict]) -> None:
     rows = "".join(
         f'<tr>'
         f'<td><div class="unit-number">Unit {_escape(unit["unitNumber"])}</div>'
         f'<div class="unit-title">{_escape(unit.get("unitTitle", "—"))}</div></td>'
         f'<td><span class="preview-badge">{_escape(unit["topicCount"])} topics</span></td>'
+        f'<td><div class="unit-description">{_format_topics(unit.get("topics", []))}</div></td>'
         f'<td><div class="unit-description">{_escape(unit.get("shortDescription", "—"))}</div></td>'
         f'</tr>'
         for unit in units
@@ -160,12 +169,21 @@ def _render_units_table(units: list[dict]) -> None:
         f'<table class="preview-units-table">'
         f'<thead><tr>'
         f'<th>Unit &amp; Theme</th>'
-        f'<th>Topic Count per Unit</th>'
+        f'<th>Topic Count</th>'
+        f'<th>Topics</th>'
         f'<th>Description</th>'
         f'</tr></thead>'
         f'<tbody>{rows}</tbody>'
         f'</table>'
     )
+
+
+def _average_topics_per_unit(units: list[dict]) -> int:
+    if not units:
+        return 0
+
+    total_topics = sum(unit.get("topicCount", 0) for unit in units)
+    return max(1, round(total_topics / len(units))) if total_topics else 0
 
 
 def render_preview() -> None:
@@ -184,34 +202,42 @@ def render_preview() -> None:
     
 
     units = result.get("units", [])
-    total_units = result.get("totalUnits", len(units) if units else "N/A")
+    total_units = result.get("totalUnits", len(units) if units else 0)
+    total_topics = sum(
+        len(unit.get("topics", [])) or unit.get("topicCount", 0)
+        for unit in units
+    )
+    warnings = result.get("warnings", [])
+    enforcement = result.get("enforcement", {})
 
-   
     credit = int(st.session_state.credit)
-
-    if units:
-        topics_per_unit = units[0]["topicCount"]
-    else:
-        topics_per_unit = 0
+    topics_per_unit = _average_topics_per_unit(units)
 
     ugc = calculate_ugc_metrics(
         credit,
         total_units,
-        topics_per_unit
+        topics_per_unit,
     )
 
     time_data = calculate_time_distribution(
         total_units,
         topics_per_unit,
-        ugc["learning_hours"]
+        ugc["learning_hours"],
     )
 
-    slm = generate_slm_structure(
-        total_units,
-        topics_per_unit
-    )
+    slm = generate_slm_structure(units)
 
-    _render_summary_card(total_units)
+    if warnings:
+        for warning in warnings:
+            st.warning(warning)
+
+    if enforcement.get("topicsApplied") and enforcement.get("topicsPreserved"):
+        st.success(
+            f"Standard Model enforced {total_units} unit(s) with all "
+            f"{enforcement.get('totalTopicsExtracted', total_topics)} extracted topic(s) preserved."
+        )
+
+    _render_summary_card(total_units, total_topics)
 
     st.markdown("---")
 
@@ -301,24 +327,14 @@ def render_preview() -> None:
     st.subheader("Generated Units & Themes")
 
     st.caption(
-        "Each unit includes a rule-engine theme with 4–5 topics based on the selected structuring model."
+        "Standard Model unit count is enforced. Extracted syllabus topics are "
+        "redistributed evenly across these units without loss."
     )
 
-    if "units_data" in st.session_state and st.session_state.units_data:
-
-        for unit_name, topics in st.session_state.units_data.items():
-
-            st.markdown(f"### {unit_name}")
-
-            for topic in topics:
-                st.write("•", topic)
-
+    if units:
+        _render_units_table(units)
     else:
-
-        if units:
-            _render_units_table(units)
-        else:
-            st.info("No units were generated.")
+        st.info("No units were generated.")
 
     st.markdown("---")
 

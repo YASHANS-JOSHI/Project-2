@@ -36,6 +36,7 @@ def reset_to_form() -> None:
     st.session_state.generated_result = None
     st.session_state.generation_error = None
     st.session_state.form_error = None
+    st.session_state.units_data = None
 
 
 def store_course_form(

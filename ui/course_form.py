@@ -2,12 +2,11 @@ import streamlit as st
 
 from services.model_service import generate_structure
 from services.rule_engine_service import generate_unit_themes, merge_structure_with_themes
+from services.topic_distribution import enforce_standard_model
 from services.validation import validate_course_form
 from utils.session import store_course_form
 
 from services.pdf_parser import extract_text_from_pdf
-from services.unit_parser import extract_units_and_topics
-
 from services.gemini_parser import extract_units_topics_with_gemini
 
 
@@ -84,28 +83,18 @@ def render_course_form() -> None:
 
         uploaded_file_name = uploaded_file.name if uploaded_file else None
         if uploaded_file:
+            syllabus_text = extract_text_from_pdf(uploaded_file)
 
-            syllabus_text = extract_text_from_pdf(
-                uploaded_file
-            )
-             
             st.text_area(
                 "Extracted PDF Text",
                 syllabus_text,
-                height=300
+                height=300,
             )
 
-           
-
-            units_data = extract_units_topics_with_gemini(
-                    syllabus_text
-                )
-            
-
+            units_data = extract_units_topics_with_gemini(syllabus_text)
             st.session_state.units_data = units_data
-            
-
-           
+        else:
+            st.session_state.units_data = None
         store_course_form(
             program_name.strip(),
             course_name.strip(),
@@ -116,6 +105,8 @@ def render_course_form() -> None:
         )
 
         with st.spinner("Generating syllabus structure and unit themes..."):
+            st.write("DEBUG CREDIT:", st.session_state.credit)
+            st.write("DEBUG MODEL:", st.session_state.model_type)
             try:
                 result = generate_structure(
                     st.session_state.model_type,
@@ -129,12 +120,17 @@ def render_course_form() -> None:
                 st.session_state.generation_error = result["error"]
                 st.rerun()
 
+            enforced = enforce_standard_model(
+                result,
+                st.session_state.units_data,
+            )
+
             try:
                 themes = generate_unit_themes(
                     st.session_state.course_name,
                     st.session_state.credit,
                     st.session_state.model_type,
-                    result["units"],
+                    enforced["units"],
                 )
             except RuntimeError as exc:
                 st.session_state.generation_error = str(exc)
@@ -145,7 +141,7 @@ def render_course_form() -> None:
                 st.rerun()
 
             st.session_state.generated_result = merge_structure_with_themes(
-                result,
+                enforced,
                 themes,
             )
         st.session_state.current_step = "preview"

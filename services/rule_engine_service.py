@@ -67,6 +67,11 @@ def merge_structure_with_themes(structure: dict, themes: dict) -> dict:
                 **structure_unit,
                 "unitTitle": themed_unit.get("unitTitle"),
                 "shortDescription": themed_unit.get("shortDescription"),
+                "topics": structure_unit.get("topics", []),
+                "topicCount": structure_unit.get(
+                    "topicCount",
+                    len(structure_unit.get("topics", [])),
+                ),
             }
         )
 
@@ -74,4 +79,6 @@ def merge_structure_with_themes(structure: dict, themes: dict) -> dict:
         **structure,
         "courseName": themes.get("courseName", structure.get("courseName")),
         "units": merged_units,
+        "warnings": structure.get("warnings", []),
+        "enforcement": structure.get("enforcement", {}),
     }
