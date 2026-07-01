@@ -7,7 +7,9 @@ from utils.session import reset_to_form
 from services.calculation_engine import calculate_ugc_metrics
 from services.time_engine import calculate_time_distribution
 from services.slm_generator import generate_slm_structure
-
+from services.unit_ppt_generator import (
+    generate_unit_presentation
+)
 PREVIEW_STYLES = """
 <style>
 .preview-summary-card {
@@ -337,7 +339,67 @@ def render_preview() -> None:
         st.info("No units were generated.")
 
     st.markdown("---")
+    st.subheader("PowerPoint Generation")
+    st.write("DEBUG 1")
 
+    st.write("Units Count:", len(units))
+
+    st.write(units)
+
+    st.button("TEST BUTTON")
+
+    if st.button("Generate PPTs"):
+
+        ppt_files = {}
+
+        with st.spinner("Generating PowerPoint presentations..."):
+
+            for unit in units:
+
+                unit_name = unit.get(
+                    "unitTitle",
+                    f"Unit {unit['unitNumber']}"
+                )
+
+                topics = unit.get(
+                    "topics",
+                    []
+                )
+
+                ppt_path = generate_unit_presentation(
+                    unit_name,
+                    topics
+                )
+
+                ppt_files[unit_name] = ppt_path
+
+        st.session_state.ppt_files = ppt_files
+
+        st.success(
+            "PowerPoint presentations generated successfully!"
+        )
+
+    if "ppt_files" in st.session_state:
+
+        st.subheader("Download PPTs")
+
+        for unit_name, ppt_path in (
+            st.session_state.ppt_files.items()
+        ):
+
+            with open(
+                ppt_path,
+                "rb"
+            ) as file:
+
+                st.download_button(
+                    label=f"Download {unit_name}",
+                    data=file,
+                    file_name=ppt_path.split("\\")[-1],
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+
+    st.markdown("---")
     if st.button("Back to Course Form"):
         reset_to_form()
         st.rerun()
