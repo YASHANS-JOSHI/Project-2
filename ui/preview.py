@@ -1,4 +1,5 @@
 import html
+import os
 
 import streamlit as st
 
@@ -8,7 +9,12 @@ from services.calculation_engine import calculate_ugc_metrics
 from services.time_engine import calculate_time_distribution
 from services.slm_generator import generate_slm_structure
 from services.unit_ppt_generator import (
-    generate_unit_presentation
+    UnitPresentationError,
+    generate_unit_presentation,
+)
+from services.ppt_content_generator import (
+    GeminiQuotaExceededError,
+    PptContentError,
 )
 PREVIEW_STYLES = """
 <style>
@@ -188,6 +194,309 @@ def _average_topics_per_unit(units: list[dict]) -> int:
     return max(1, round(total_topics / len(units))) if total_topics else 0
 
 
+def _unit_display_name(unit: dict) -> str:
+    return unit.get(
+        "unitTitle",
+        f"Unit {unit['unitNumber']}",
+    )
+
+
+def _unit_key(unit: dict) -> str:
+    return f"unit_{unit.get('unitNumber')}"
+
+
+def _init_ppt_session_state() -> None:
+    if "ppt_files" not in st.session_state:
+        st.session_state.ppt_files = {}
+
+    if "ppt_generation_status" not in st.session_state:
+        st.session_state.ppt_generation_status = {}
+
+    if "ppt_errors" not in st.session_state:
+        st.session_state.ppt_errors = {}
+
+    if "ppt_metadata" not in st.session_state:
+        st.session_state.ppt_metadata = {}
+
+
+def _sync_ppt_state_from_files(units: list[dict]) -> None:
+    _init_ppt_session_state()
+
+    for unit in units:
+        unit_key = _unit_key(unit)
+        ppt_path = st.session_state.ppt_files.get(unit_key)
+
+        if not ppt_path:
+            continue
+
+        if os.path.exists(ppt_path):
+            st.session_state.ppt_generation_status[unit_key] = "completed"
+            st.session_state.ppt_errors.pop(unit_key, None)
+            if unit_key not in st.session_state.ppt_metadata:
+                _store_ppt_metadata(
+                    unit_key,
+                    ppt_path,
+                    len(unit.get("topics", [])),
+                )
+        elif (
+            st.session_state.ppt_generation_status.get(unit_key)
+            == "completed"
+        ):
+            st.session_state.ppt_generation_status[unit_key] = "failed"
+            st.session_state.ppt_errors[unit_key] = (
+                "Generated file not found. Please regenerate."
+            )
+
+
+def _ppt_slide_count(ppt_path: str) -> int | None:
+    try:
+        from pptx import Presentation
+
+        return len(Presentation(ppt_path).slides)
+    except Exception:
+        return None
+
+
+def _store_ppt_metadata(
+    unit_key: str,
+    ppt_path: str,
+    topic_count: int,
+) -> None:
+    slide_count = _ppt_slide_count(ppt_path)
+    st.session_state.ppt_metadata[unit_key] = {
+        "slides": slide_count,
+        "topics": topic_count,
+        "filename": os.path.basename(ppt_path),
+    }
+
+
+def _generate_unit_ppt(
+    unit: dict,
+    unit_index: int,
+    total_units: int,
+    ugc: dict,
+    *,
+    force: bool = False,
+) -> str:
+    _init_ppt_session_state()
+
+    unit_key = _unit_key(unit)
+    unit_name = _unit_display_name(unit)
+    unit_number = unit.get("unitNumber", unit_index)
+    topics = unit.get("topics", [])
+
+    if not force:
+        existing_path = st.session_state.ppt_files.get(unit_key)
+        status = st.session_state.ppt_generation_status.get(
+            unit_key,
+            "not_started",
+        )
+        if (
+            status == "completed"
+            and existing_path
+            and os.path.exists(existing_path)
+        ):
+            return "skipped"
+
+    st.session_state.ppt_generation_status[unit_key] = "generating"
+    status_box = st.empty()
+    status_box.info(
+        f"Generating Unit {unit_index} of {total_units}: {unit_name}"
+    )
+
+    try:
+        ppt_path = generate_unit_presentation(
+            unit_name=unit_name,
+            topics=topics,
+            words_per_unit=ugc["words_per_unit"],
+            words_per_topic=ugc["words_per_topic"],
+            unit_number=unit_number,
+            course_name=st.session_state.course_name,
+            academic_level=st.session_state.level,
+        )
+        st.session_state.ppt_files[unit_key] = ppt_path
+        st.session_state.ppt_generation_status[unit_key] = "completed"
+        st.session_state.ppt_errors.pop(unit_key, None)
+        _store_ppt_metadata(unit_key, ppt_path, len(topics))
+        status_box.success(f"Completed Unit {unit_number}: {unit_name}")
+        return "success"
+    except GeminiQuotaExceededError as error:
+        st.session_state.ppt_generation_status[unit_key] = "failed"
+        st.session_state.ppt_errors[unit_key] = str(error)
+        status_box.error(str(error))
+        return "quota"
+    except (PptContentError, UnitPresentationError) as error:
+        st.session_state.ppt_generation_status[unit_key] = "failed"
+        st.session_state.ppt_errors[unit_key] = str(error)
+        status_box.error(f"Unit {unit_number}: {error}")
+        return "failed"
+    except Exception as error:
+        st.session_state.ppt_generation_status[unit_key] = "failed"
+        st.session_state.ppt_errors[unit_key] = str(error)
+        status_box.error(f"Unit {unit_number}: {error}")
+        return "failed"
+
+
+def _render_unit_download(unit_key: str) -> None:
+    ppt_path = st.session_state.ppt_files.get(unit_key)
+
+    if not ppt_path:
+        return
+
+    if not os.path.exists(ppt_path):
+        st.warning("Generated file not found. Please regenerate.")
+        return
+
+    with open(ppt_path, "rb") as ppt_file:
+        st.download_button(
+            label="📥 Download PPT",
+            data=ppt_file.read(),
+            file_name=os.path.basename(ppt_path),
+            mime=(
+                "application/vnd.openxmlformats-officedocument"
+                ".presentationml.presentation"
+            ),
+            key=f"download_{unit_key}",
+        )
+
+
+def _render_unit_ppt_status(unit: dict) -> None:
+    unit_key = _unit_key(unit)
+    unit_name = _unit_display_name(unit)
+    unit_number = unit.get("unitNumber")
+    topic_count = len(unit.get("topics", []))
+    status = st.session_state.ppt_generation_status.get(
+        unit_key,
+        "not_started",
+    )
+    metadata = st.session_state.ppt_metadata.get(unit_key, {})
+    ppt_path = st.session_state.ppt_files.get(unit_key)
+
+    st.markdown(f"### Unit {unit_number}: {unit_name}")
+
+    if status == "completed" and ppt_path and os.path.exists(ppt_path):
+        st.success("✅ Completed")
+        slides_generated = metadata.get("slides")
+        if slides_generated is not None:
+            st.write(f"Slides Generated: {slides_generated}")
+        st.write(f"Topics Covered: {metadata.get('topics', topic_count)}")
+        st.write(
+            "Generated File: "
+            f"{metadata.get('filename', os.path.basename(ppt_path))}"
+        )
+        _render_unit_download(unit_key)
+    elif status == "completed" and (
+        not ppt_path or not os.path.exists(ppt_path)
+    ):
+        st.warning("Generated file not found. Please regenerate.")
+    elif status == "generating":
+        st.info("Generating...")
+    elif status == "failed":
+        error_message = st.session_state.ppt_errors.get(unit_key)
+        if error_message:
+            st.error(error_message)
+    else:
+        st.caption(f"{topic_count} topics — Not started")
+
+
+def _render_ppt_generation(units: list[dict], ugc: dict) -> None:
+    _init_ppt_session_state()
+    _sync_ppt_state_from_files(units)
+    total_units = len(units)
+
+    st.markdown("---")
+    st.subheader("PowerPoint Generation")
+    st.caption(
+        "One Gemini API call per unit. UGC/DEB word budgets guide depth only: "
+        f"{ugc['words_per_unit']} words/unit and "
+        f"{ugc['words_per_topic']} words/topic (average), "
+        f"within {ugc['min_words']}–{ugc['max_words']} total words."
+    )
+
+    action_col, clear_col = st.columns(2)
+
+    with action_col:
+        generate_all = st.button(
+            "Generate All Unit PPTs",
+            type="primary",
+            key="generate_all_ppts",
+        )
+
+    with clear_col:
+        if st.button("Clear Generated PPTs", key="clear_generated_ppts"):
+            st.session_state.ppt_files = {}
+            st.session_state.ppt_generation_status = {}
+            st.session_state.ppt_errors = {}
+            st.session_state.ppt_metadata = {}
+            st.rerun()
+
+    if generate_all:
+        progress = st.progress(0.0)
+        status = st.empty()
+
+        for index, unit in enumerate(units, start=1):
+            unit_name = _unit_display_name(unit)
+            status.write(
+                f"Generating Unit {index} of {total_units}: {unit_name}"
+            )
+            result = _generate_unit_ppt(
+                unit,
+                index,
+                total_units,
+                ugc,
+            )
+            progress.progress(index / total_units)
+
+            if result == "quota":
+                st.error(
+                    "Gemini quota or rate limit reached. "
+                    "Completed units remain available for download."
+                )
+                break
+
+        completed = sum(
+            1
+            for unit in units
+            if st.session_state.ppt_generation_status.get(
+                _unit_key(unit)
+            ) == "completed"
+            and os.path.exists(
+                st.session_state.ppt_files.get(_unit_key(unit), "")
+            )
+        )
+        if completed:
+            st.success(
+                f"Generated {completed} of {total_units} unit presentation(s)."
+            )
+
+    for index, unit in enumerate(units, start=1):
+        unit_number = unit.get("unitNumber", index)
+
+        with st.container(border=True):
+            if st.button(
+                "Generate Unit PPT",
+                key=f"generate_ppt_{unit_number}",
+            ):
+                _generate_unit_ppt(
+                    unit,
+                    index,
+                    total_units,
+                    ugc,
+                    force=True,
+                )
+
+            _render_unit_ppt_status(unit)
+
+    if st.session_state.ppt_errors:
+        st.subheader("Generation Errors")
+
+        for unit in units:
+            unit_key = _unit_key(unit)
+            message = st.session_state.ppt_errors.get(unit_key)
+            if message:
+                st.error(f"{_unit_display_name(unit)}: {message}")
+
+
 def render_preview() -> None:
     result = st.session_state.generated_result
 
@@ -338,66 +647,7 @@ def render_preview() -> None:
     else:
         st.info("No units were generated.")
 
-    st.markdown("---")
-    st.subheader("PowerPoint Generation")
-    st.write("DEBUG 1")
-
-    st.write("Units Count:", len(units))
-
-    st.write(units)
-
-    st.button("TEST BUTTON")
-
-    if st.button("Generate PPTs"):
-
-        ppt_files = {}
-
-        with st.spinner("Generating PowerPoint presentations..."):
-
-            for unit in units:
-
-                unit_name = unit.get(
-                    "unitTitle",
-                    f"Unit {unit['unitNumber']}"
-                )
-
-                topics = unit.get(
-                    "topics",
-                    []
-                )
-
-                ppt_path = generate_unit_presentation(
-                    unit_name,
-                    topics
-                )
-
-                ppt_files[unit_name] = ppt_path
-
-        st.session_state.ppt_files = ppt_files
-
-        st.success(
-            "PowerPoint presentations generated successfully!"
-        )
-
-    if "ppt_files" in st.session_state:
-
-        st.subheader("Download PPTs")
-
-        for unit_name, ppt_path in (
-            st.session_state.ppt_files.items()
-        ):
-
-            with open(
-                ppt_path,
-                "rb"
-            ) as file:
-
-                st.download_button(
-                    label=f"Download {unit_name}",
-                    data=file,
-                    file_name=ppt_path.split("\\")[-1],
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                )
+    _render_ppt_generation(units, ugc)
 
     st.markdown("---")
     if st.button("Back to Course Form"):
